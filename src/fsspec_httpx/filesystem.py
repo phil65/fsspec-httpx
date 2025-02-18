@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 import contextlib
 from copy import copy
 import io
@@ -36,7 +35,7 @@ from yarl import URL
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 
 # URL pattern in HTML href tags
@@ -103,10 +102,11 @@ class HTTPFileSystem(AsyncFileSystem):
         if loop is not None and loop.is_running():
             try:
                 sync(loop, session.aclose, timeout=0.1)
-                return
             except (TimeoutError, FSTimeoutError, NotImplementedError, RuntimeError):
                 # If we can't close it properly, just let it be garbage collected
                 pass
+            else:
+                return
 
     async def set_session(self) -> httpx.AsyncClient:
         if self._session is None:
@@ -182,7 +182,7 @@ class HTTPFileSystem(AsyncFileSystem):
                 or "[To Parent Directory]" in link
                 or (
                     link.startswith("/")
-                    and os.path.dirname(base_path).rstrip("/") == link.rstrip("/")
+                    and os.path.dirname(base_path).rstrip("/") == link.rstrip("/")  # noqa
                 )
             ):
                 continue
@@ -276,15 +276,15 @@ class HTTPFileSystem(AsyncFileSystem):
         callback.set_size(size)
         self._raise_not_found_for_status(r, rpath)
 
-        outfile = lpath if isfilelike(lpath) else open(lpath, "wb")
+        outfile = lpath if isfilelike(lpath) else open(lpath, "wb")  # type: ignore  # noqa: PTH123, SIM115
 
         try:
             async for chunk in r.aiter_bytes(chunk_size):
-                outfile.write(chunk)
+                outfile.write(chunk)  # type: ignore
                 callback.relative_update(len(chunk))
         finally:
             if not isfilelike(lpath):
-                outfile.close()
+                outfile.close()  # type: ignore
 
     async def _put_file(
         self,
@@ -305,7 +305,7 @@ class HTTPFileSystem(AsyncFileSystem):
                 context = nullcontext(lpath)
                 use_seek = False
             else:
-                context = open(lpath, "rb")  # noqa: SIM115
+                context = open(lpath, "rb")  # noqa: PTH123, SIM115
                 use_seek = True
 
             with context as f:
