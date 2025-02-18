@@ -112,27 +112,17 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
         file_path = self.path
         logger.debug("Test server received request for: %s", file_path)
 
-        if file_path.endswith("/"):
-            # Return directory listing
-            listing_html = self._make_index_response(baseurl, self.files)
-            logger.debug("Returning listing HTML: %s", listing_html)
-            return self._respond(200, {"Content-Type": "text/html"}, listing_html)
-        # Handle index directory specially
-        if file_path == "/index":
-            html = f"""<!DOCTYPE html><html><body>
-                <a href="{baseurl}/index/realfile">Link</a>
-                </body></html>""".encode()
-            return self._respond(200, {"Content-Type": "text/html"}, html)
-
-        # Handle simple directory
-        if file_path == "/simple":
-            html = f"""<!DOCTYPE html><html><body>
-                <a href="{baseurl}/simple/file">file</a>
-                <a href="{baseurl}/simple/dir/">dir/</a>
-                </body></html>""".encode()
-            return self._respond(200, {"Content-Type": "text/html"}, html)
-
+        # First check for exact match
         file_data = self.files.get(file_path)
+
+        # If not found and path ends with /, try without the slash
+        if file_data is None and file_path.endswith("/"):
+            file_data = self.files.get(file_path.rstrip("/"))
+
+        # If not found and path doesn't end with /, try with the slash
+        if file_data is None and not file_path.endswith("/"):
+            file_data = self.files.get(file_path + "/")
+
         if callable(file_data):
             file_data = file_data(baseurl)
 

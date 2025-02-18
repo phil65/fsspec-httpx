@@ -165,7 +165,7 @@ class HTTPFileSystem(AsyncFileSystem):
         """List contents of a URL path."""
         kw = self.kwargs.copy()
         kw.update(kwargs)
-        logger.debug(url)
+        logger.debug("URL: %s", url)
         session = await self.set_session()
 
         base_url = url.rstrip("/")
@@ -186,8 +186,19 @@ class HTTPFileSystem(AsyncFileSystem):
 
         # Process links
         parts = urlparse(base_url)
+        base_path = parts.path.rstrip("/")
+
         for link in links:
-            if link in ["..", "../"]:
+            # Skip parent directory links and relative navigation
+            if (
+                link in ["..", "../"]
+                or link == "/data/"
+                or "[To Parent Directory]" in link
+                or (
+                    link.startswith("/")
+                    and os.path.dirname(base_path).rstrip("/") == link.rstrip("/")
+                )
+            ):
                 continue
 
             if link.startswith("/"):
@@ -195,7 +206,6 @@ class HTTPFileSystem(AsyncFileSystem):
             elif not link.startswith(("http://", "https://")):
                 link = f"{base_url}/{link.lstrip('/')}"
 
-            # Handle different hostnames
             link_parts = urlparse(link)
             if link_parts.netloc != parts.netloc:
                 link = f"{parts.scheme}://{parts.netloc}{link_parts.path}"
@@ -222,12 +232,14 @@ class HTTPFileSystem(AsyncFileSystem):
                 out = await self._ls_real(url, detail=detail, **kwargs)
                 if not out:
                     raise FileNotFoundError(url)
-                self.dircache[url] = out
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 404:
-                    raise FileNotFoundError(url) from e
-                raise
-        return out
+                if self.use_listings_cache:
+                    self.dircache[url] = out
+            except Exception as e:
+                raise FileNotFoundError(url) from e
+
+        if detail:
+            return out
+        return sorted(out)
 
     ls = sync_wrapper(_ls)
 
