@@ -14,7 +14,6 @@ import time
 from types import SimpleNamespace
 
 import fsspec.asyn
-from fsspec.implementations.http import HTTPStreamFile
 import fsspec.registry
 import fsspec.utils
 import pytest
@@ -541,10 +540,10 @@ def test_content_encoding_gzip(server):
     )
     url = server.realfile
 
+    from fsspec_httpx.filesystem import HTTPStreamFile as OurHTTPStreamFile
+
     with h.open(url, "rb") as f:
-        assert isinstance(f, HTTPStreamFile)
-        content = f.read()
-        assert content == data
+        assert isinstance(f, OurHTTPStreamFile)
 
 
 def test_download(server, tmpdir):

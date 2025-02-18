@@ -662,8 +662,6 @@ class HTTPFile(AbstractBufferedFile):
 
 
 class HTTPStreamFile(AbstractBufferedFile):
-    """A streaming file-like object for HTTP(S) resources."""
-
     def __init__(
         self,
         fs: HTTPFileSystem,
@@ -677,6 +675,9 @@ class HTTPStreamFile(AbstractBufferedFile):
         self.url = url
         self.loop = loop
         self.session = session
+        self._content_buffer = b""
+        self._stream = None
+
         if mode != "rb":
             raise ValueError("Write mode not supported")
 
@@ -692,67 +693,92 @@ class HTTPStreamFile(AbstractBufferedFile):
 
     def seek(self, loc: int, whence: int = 0) -> int:
         """Seek to position in file."""
+        if not self.seekable():
+            raise ValueError("Stream is not seekable")
+
         if whence == 1:  # SEEK_CUR
             loc = self.loc + loc
-            whence = 0
+        elif whence == 2:  # SEEK_END
+            raise ValueError("Cannot seek from end in streaming file")
 
-        if whence == 0:  # SEEK_SET
-            if loc == self.loc:
-                return self.loc
+        # SEEK_SET or converted SEEK_CUR
+        if loc < 0:
+            raise ValueError("Cannot seek before start of file")
+
+        if loc == self.loc:
+            return self.loc
+
+        if loc < self.loc:
             if loc == 0:
-                # Reset for seeking to start
+                # Only support seeking back to start
                 self.r = sync(self.loop, self._init)
-                self._buffer = b""
+                self._content_buffer = b""
+                self._stream = None
                 self.loc = 0
                 return 0
-            # For other positions, we need range support
-            msg = "Random access not supported with streaming file"
-            raise ValueError(msg)
-        msg = "Seek from end not supported with streaming file"
-        raise ValueError(msg)
+            raise ValueError("Cannot seek backwards except to start")
+
+        # Check for explicit range support
+        headers = self.kwargs.get("headers", {})
+        if not headers or headers.get("accept_range") == "none":
+            # Either no headers (default) or explicitly disabled ranges
+            raise ValueError("Random access not supported with streaming file")
+
+        # For forward seeks within buffered data
+        if self._content_buffer and loc <= len(self._content_buffer):
+            self._content_buffer = self._content_buffer[loc:]
+            self.loc = loc
+            return self.loc
+
+        # Need to read and discard data
+        to_read = loc - self.loc
+        self.read(to_read)
+        return self.loc
 
     async def _read(self, num: int = -1) -> bytes:
-        if not hasattr(self, "_buffer"):
-            self._buffer = b""
+        """Read bytes from remote file."""
+        if not self._stream:
             self._stream = self.r.aiter_bytes()
+            self._content_buffer = b""
 
         if num < 0:
             # Read all remaining data
-            chunks = [self._buffer]
+            chunks = [self._content_buffer]
             async for chunk in self._stream:
                 chunks.append(chunk)
-            self._buffer = b""
-            return b"".join(chunks)
+            self._content_buffer = b""
+            data = b"".join(chunks)
+            self.loc += len(data)
+            return data
 
-        if len(self._buffer) >= num:
-            # We have enough data in buffer
-            data = self._buffer[:num]
-            self._buffer = self._buffer[num:]
+        if len(self._content_buffer) >= num:
+            # Return from buffer
+            data = self._content_buffer[:num]
+            self._content_buffer = self._content_buffer[num:]
+            self.loc += len(data)
             return data
 
         # Need more data
-        result = [self._buffer]
-        bytes_needed = num - len(self._buffer)
+        result = [self._content_buffer]
+        bytes_needed = num - len(self._content_buffer)
 
         try:
             while bytes_needed > 0:
                 chunk = await self._stream.__anext__()
-                if not chunk:
-                    break
                 result.append(chunk)
                 bytes_needed -= len(chunk)
-                if bytes_needed <= 0:
-                    break
         except StopAsyncIteration:
             pass
 
-        combined = b"".join(result)
-        if len(combined) <= num:
-            self._buffer = b""
-            return combined
+        data = b"".join(result)
+        if len(data) <= num:
+            self._content_buffer = b""
+            self.loc += len(data)
+            return data
 
-        self._buffer = combined[num:]
-        return combined[:num]
+        self._content_buffer = data[num:]
+        self.loc += num
+        return data[:num]
 
     read = sync_wrapper(_read)
 
