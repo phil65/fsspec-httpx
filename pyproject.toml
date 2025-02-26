@@ -38,6 +38,7 @@ dependencies = [
     # Only add below (Copier)
     "fsspec>=2025.2.0",
     "httpx>=0.28.1",
+    "yarl",
 ]
 
 [tool.uv]
@@ -154,7 +155,7 @@ select = [
     # "TD",   # flake8-todos
     "T10", # flake8-debugger
     # "T20",  # flake8-print
-    "TC", # flake8-type-checking
+    "TC",  # flake8-type-checking
     "TID", # flake8-tidy-imports
     "TRY", # tryceratops
     "UP",  # PyUpgrade
