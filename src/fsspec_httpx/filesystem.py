@@ -31,6 +31,7 @@ from fsspec.utils import (
     tokenize,
 )
 import httpx
+from upath import UPath
 from yarl import URL
 
 
@@ -43,6 +44,12 @@ HREF_PATTERN = re.compile(r"""<(a|A)\s+(?:[^>]*?\s+)?(href|HREF)=["'](?P<url>[^"
 # URL pattern for direct links
 URL_PATTERN = re.compile(r"""(?P<url>http[s]?://[-a-zA-Z0-9@:%_+.~#?&/=]+)""")
 logger = logging.getLogger("fsspec.http")
+
+
+class HttpPath(UPath):
+    """UPath implementation for CLI filesystems."""
+
+    __slots__ = ()
 
 
 async def get_client(**kwargs: Any) -> httpx.AsyncClient:
@@ -89,6 +96,10 @@ class HTTPFileSystem(AsyncFileSystem):
         request_options.pop("max_paths", None)
         request_options.pop("skip_instance_cache", None)
         self.kwargs = request_options
+
+    def _make_path(self, path: str) -> UPath:
+        """Create a path object from string."""
+        return HttpPath(path)
 
     @property
     def fsid(self) -> str:

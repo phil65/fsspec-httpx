@@ -38,6 +38,7 @@ dependencies = [
     # Only add below (Copier)
     "fsspec>=2025.2.0",
     "httpx>=0.28.1",
+    "universal-pathlib>=0.2.6",
     "yarl",
 ]
 
