@@ -12,6 +12,7 @@ import os
 import threading
 import time
 from types import SimpleNamespace
+from typing import Any, ClassVar
 
 import fsspec.asyn
 import fsspec.registry
@@ -25,8 +26,9 @@ logger = logging.getLogger(__name__)
 fsspec.register_implementation("http", HTTPFileSystem, clobber=True)
 
 data = b"\n".join([b"some test data"] * 1000)
-listing = open(
-    os.path.join(os.path.dirname(__file__), "data", "listing.html"), "rb"
+listing = open(  # noqa: PTH123, SIM115
+    os.path.join(os.path.dirname(__file__), "data", "listing.html"),  # noqa: PTH118, PTH120
+    "rb",
 ).read()
 win = os.name == "nt"
 
@@ -59,7 +61,7 @@ def reset_files():
 
 
 class HTTPTestHandler(BaseHTTPRequestHandler):
-    static_files = {
+    static_files: ClassVar = {
         "/index/realfile": data,
         "/index/otherfile": data,
         "/index": _make_index_listing,
@@ -69,7 +71,7 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
         "/simple/dir/": _make_listing("/simple/dir/file"),
         "/simple/dir/file": data,
     }
-    dynamic_files = {}
+    dynamic_files: ClassVar[dict[str, Any]] = {}
 
     files = ChainMap(dynamic_files, static_files)
 
@@ -107,13 +109,13 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
         if data:
             self.wfile.write(data)
 
-    def do_GET(self):
+    def do_GET(self):  # noqa: N802
         baseurl = f"http://{self.server.server_name}:{self.server.server_port}"
         file_path = self.path
         logger.debug("Test server received request for: %s", file_path)
 
         # First check for exact match
-        file_data = self.files.get(file_path)
+        file_data: Any = self.files.get(file_path)
 
         # If not found and path ends with /, try without the slash
         if file_data is None and file_path.endswith("/"):
@@ -137,6 +139,7 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
             return self._respond(404)
 
         status = 200
+
         content_range = f"bytes 0-{len(file_data) - 1}/{len(file_data)}"
         if ("Range" in self.headers) and ("ignore_range" not in self.headers):
             ran = self.headers["Range"]
@@ -147,8 +150,8 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
                 file_data = file_data[int(start) : (int(end) + 1) if end else None]
             else:
                 # suffix only
-                l = len(file_data)
-                content_range = f"bytes {l - int(end)}-{l - 1}/{l}"
+                length = len(file_data)
+                content_range = f"bytes {length - int(end)}-{length - 1}/{length}"
                 file_data = file_data[-int(end) :]
             if "use_206" in self.headers:
                 status = 206
@@ -162,14 +165,17 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
             else:
                 response_headers = {"Content-Length": len(file_data)}
             self._respond(status, response_headers, file_data)
-        elif "give_range" in self.headers:
+            return None
+        if "give_range" in self.headers:
             self._respond(status, {"Content-Range": content_range}, file_data)
-        elif "give_mimetype" in self.headers:
+            return None
+        if "give_mimetype" in self.headers:
             self._respond(status, {"Content-Type": "text/html; charset=utf-8"}, file_data)
-        else:
-            self._respond(status, data=file_data)
+            return None
+        self._respond(status, data=file_data)
+        return None
 
-    def do_POST(self):
+    def do_POST(self):  # noqa: N802
         length = self.headers.get("Content-Length")
         file_path = self.path.rstrip("/")
         if length is None:
@@ -179,21 +185,18 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
             self.files[file_path] = self.rfile.read(length)
         self._respond(200)
 
-    do_PUT = do_POST
+    do_PUT = do_POST  # noqa: N815
 
     def read_chunks(self):
         length = -1
         while length != 0:
             line = self.rfile.readline().strip()
-            if len(line) == 0:
-                length = 0
-            else:
-                length = int(line, 16)
+            length = 0 if len(line) == 0 else int(line, 16)
             yield self.rfile.read(length)
             self.rfile.readline()
 
-    def do_HEAD(self):
-        r_headers = {}
+    def do_HEAD(self):  # noqa: N802
+        r_headers: dict[str, Any] = {}
         if "head_not_auth" in self.headers:
             r_headers["Content-Length"] = 123
             return self._respond(403, r_headers, b"not authorized for HEAD request")
@@ -223,6 +226,7 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
             r_headers["Accept-Ranges"] = "none"
 
         self._respond(200, r_headers)
+        return None
 
 
 @contextlib.contextmanager
@@ -254,7 +258,7 @@ def test_list(server):
 
 
 def test_list_invalid_args(server):
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError):  # noqa: PT012
         h = fsspec.filesystem("http", use_foobar=True)
         h.glob(server.address + "/index/*")
 
@@ -461,7 +465,7 @@ def test_random_access(server, headers):
             f.seek(5, 1)
             assert f.read(5) == data[10:15]
         else:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError):  # noqa: PT011
                 f.seek(5, 1)
     assert f.closed
 
@@ -483,7 +487,7 @@ def test_no_range_support(server, headers):
     url = server.realfile
     with h.open(url, "rb") as f:
         # Random access is not possible if the server doesn't respect Range
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError):  # noqa: PT012
             f.seek(5)
             f.read(10)
 
@@ -540,9 +544,9 @@ def test_download(server, tmpdir):
     # Remove space after "true"
     h = fsspec.filesystem("http", headers={"give_length": "true", "head_ok": "true"})
     url = server.realfile
-    fn = os.path.join(tmpdir, "afile")
+    fn = str(tmpdir / "afile")
     h.get(url, fn)
-    assert open(fn, "rb").read() == data
+    assert open(fn, "rb").read() == data  # noqa: PTH123, SIM115
 
 
 def test_multi_download(server, tmpdir):
@@ -550,19 +554,19 @@ def test_multi_download(server, tmpdir):
     h = fsspec.filesystem("http", headers={"give_length": "true", "head_ok": "true"})
     urla = server.realfile
     urlb = server.address + "/index/otherfile"
-    fna = os.path.join(tmpdir, "afile")
-    fnb = os.path.join(tmpdir, "bfile")
+    fna = tmpdir / "afile"
+    fnb = tmpdir / "bfile"
     h.get([urla, urlb], [fna, fnb])
-    assert open(fna, "rb").read() == data
-    assert open(fnb, "rb").read() == data
+    assert open(fna, "rb").read() == data  # noqa: PTH123, SIM115
+    assert open(fnb, "rb").read() == data  # noqa: PTH123, SIM115
 
 
 def test_ls(server):
     h = fsspec.filesystem("http")
-    l = h.ls(server.address + "/data/20020401/", detail=False)
+    ls = h.ls(server.address + "/data/20020401/", detail=False)
     nc = server.address + "/data/20020401/GRACEDADM_CLSM0125US_7D.A20020401.030.nc4"
-    assert nc in l
-    assert len(l) == 11
+    assert nc in ls
+    assert len(ls) == 11  # noqa: PLR2004
     assert all(u["type"] == "file" for u in h.ls(server.address + "/data/20020401/"))
     assert h.glob(server.address + "/data/20020401/*.nc4") == [nc]
 
