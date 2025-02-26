@@ -111,6 +111,7 @@ class HTTPFileSystem(AsyncFileSystem):
     async def set_session(self) -> httpx.AsyncClient:
         if self._session is None:
             self._session = await self.get_client(**self.client_kwargs)
+            assert self._session
             if not self.asynchronous:
                 weakref.finalize(self, self.close_session, self.loop, self._session)
         return self._session
@@ -613,7 +614,7 @@ class HTTPFile(AbstractBufferedFile):
         kwargs = self.kwargs.copy()
         headers = kwargs.pop("headers", {}).copy()
         headers["Range"] = f"bytes={start}-{end - 1}"
-
+        assert self.session
         r = await self.session.get(
             str(self.fs.encode_url(self.url)),
             headers=headers,
@@ -681,6 +682,7 @@ class HTTPStreamFile(AbstractBufferedFile):
         super().__init__(fs=fs, path=url, mode=mode, cache_type="none", **kwargs)
 
         async def _init():
+            assert self.session
             r = await self.session.get(str(self.fs.encode_url(url)), **kwargs)
             self.fs._raise_not_found_for_status(r, url)
             return r
@@ -745,6 +747,7 @@ class HTTPStreamFile(AbstractBufferedFile):
         if num < 0:
             # Read all remaining data
             chunks = [self._content_buffer]
+            assert self._stream
             async for chunk in self._stream:
                 chunks.append(chunk)  # noqa: PERF401
             self._content_buffer = b""
@@ -762,8 +765,8 @@ class HTTPStreamFile(AbstractBufferedFile):
         # Need more data
         result = [self._content_buffer]
         bytes_needed = num - len(self._content_buffer)
-
         try:
+            assert self._stream
             while bytes_needed > 0:
                 chunk = await self._stream.__anext__()
                 result.append(chunk)
@@ -809,7 +812,8 @@ class AsyncStreamFile(AbstractAsyncStreamedFile):
         self.session = session
         self.r: httpx.Response | None = None
         if mode != "rb":
-            raise ValueError("Write mode not supported")
+            msg = "Write mode not supported"
+            raise ValueError(msg)
 
         self.details = {"name": url, "size": None}
         self.kwargs = kwargs
@@ -817,6 +821,7 @@ class AsyncStreamFile(AbstractAsyncStreamedFile):
         self.size = size
 
     async def read(self, num: int = -1) -> bytes:
+        assert self.session
         if self.r is None:
             r = await self.session.get(str(self.fs.encode_url(self.url)), **self.kwargs)
             self.fs._raise_not_found_for_status(r, self.url)
@@ -851,7 +856,7 @@ async def get_range(
 
     out = r.content
     if file:
-        with open(file, "r+b") as f:
+        with open(file, "r+b") as f:  # noqa: PTH123
             f.seek(start)
             f.write(out)
     else:
@@ -913,8 +918,8 @@ async def _file_info(
 
 async def _file_size(
     url: str,
-    session: httpx.AsyncClient | None = None,
     *args: Any,
+    session: httpx.AsyncClient | None = None,
     **kwargs: Any,
 ) -> int | None:
     """Get file size from remote server."""
@@ -925,7 +930,7 @@ async def _file_size(
         cleanup = False
 
     try:
-        info = await _file_info(url, session=session, *args, **kwargs)
+        info = await _file_info(url, *args, session=session, **kwargs)
         return info.get("size")
     finally:
         if cleanup:
@@ -955,7 +960,7 @@ def get_compression(
 
 def infer_compression(filename: str) -> str | None:
     """Infer compression type from file extension."""
-    extension = os.path.splitext(filename)[-1].strip(".")
+    extension = os.path.splitext(filename)[-1].strip(".")  # noqa: PTH122
     if extension in ["gz", "gzip"]:
         return "gzip"
     if extension == "bz2":
