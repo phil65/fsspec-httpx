@@ -109,7 +109,8 @@ class HTTPTestHandler(BaseHTTPRequestHandler):
         if data:
             self.wfile.write(data)
 
-    def do_GET(self):  # noqa: N802
+    def do_GET(self):  # noqa: N802, PLR0911
+        assert isinstance(self.server, HTTPServer)
         baseurl = f"http://{self.server.server_name}:{self.server.server_port}"
         file_path = self.path
         logger.debug("Test server received request for: %s", file_path)
@@ -487,7 +488,7 @@ def test_no_range_support(server, headers):
     url = server.realfile
     with h.open(url, "rb") as f:
         # Random access is not possible if the server doesn't respect Range
-        with pytest.raises(ValueError):  # noqa: PT012
+        with pytest.raises(ValueError):  # noqa: PT011, PT012
             f.seek(5)
             f.read(10)
 
@@ -502,7 +503,7 @@ def test_stream_seek(server):
     with h.open(url, "rb") as f:
         f.seek(0)  # is OK
         data1 = f.read(5)
-        assert len(data1) == 5
+        assert len(data1) == 5  # noqa: PLR2004
         f.seek(5)
         f.seek(0, 1)
         data2 = f.read()

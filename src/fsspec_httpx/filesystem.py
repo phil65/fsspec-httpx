@@ -124,7 +124,7 @@ class HTTPFileSystem(AsyncFileSystem):
     @classmethod
     def _parent(cls, path: str) -> str:
         par = super()._parent(path)
-        return par if len(par) > 7 else ""
+        return par if len(par) > 7 else ""  # noqa: PLR2004
 
     async def _get_decompressor(
         self, response: httpx.Response
