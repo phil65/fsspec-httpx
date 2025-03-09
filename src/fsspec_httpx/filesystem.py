@@ -444,6 +444,42 @@ class HTTPFileSystem(AsyncFileSystem):
         """Unique identifier; assume HTTP files are static, unchanging."""
         return tokenize(path, self.kwargs, self.protocol)
 
+    async def _pipe_file(
+        self,
+        path: str,
+        value: bytes,
+        mode: str = "overwrite",
+        **kwargs: Any,
+    ) -> None:
+        """Write bytes to a remote file over HTTP.
+
+        Parameters
+        ----------
+        path : str
+            Target URL where the data should be written
+        value : bytes
+            Data to be written
+        mode : str
+            How to write to the file - only 'overwrite' is supported
+        **kwargs : Any
+            Additional parameters to pass to the HTTP request
+        """
+        if mode != "overwrite":
+            msg = "Only 'overwrite' mode is supported"
+            raise NotImplementedError(msg)
+
+        url = self._strip_protocol(path)
+        kw = self.kwargs.copy()
+        kw.update(kwargs)
+
+        headers = kw.pop("headers", {}).copy()
+        headers["Content-Length"] = str(len(value))
+        kw["headers"] = headers
+
+        session = await self.set_session()
+        r = await session.put(str(self.encode_url(url)), content=value, **kw)
+        self._raise_not_found_for_status(r, url)
+
     async def _info(self, path: str, **kwargs: Any) -> dict[str, Any]:
         """Get info of URL."""
         info = {}
