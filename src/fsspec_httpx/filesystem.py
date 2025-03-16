@@ -9,7 +9,7 @@ import io
 import logging
 import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
 import weakref
 
@@ -532,11 +532,10 @@ class HTTPFileSystem(AsyncFileSystem):
         if "/" in path[:min_idx]:
             min_idx = path[:min_idx].rindex("/")
             root = path[: min_idx + 1]
-            depth: int | None = path[min_idx + 1 :].count("/") + 1
+            depth = path[min_idx + 1 :].count("/") + 1
         else:
             root = ""
             depth = path[min_idx + 1 :].count("/") + 1
-
         if "**" in path:
             if maxdepth is not None:
                 idx_double_stars = path.find("**")
@@ -583,7 +582,7 @@ class HTTPFile(AbstractBufferedFile):
         fs: HTTPFileSystem,
         url: str,
         session: httpx.AsyncClient | None = None,
-        block_size: int | None = None,
+        block_size: Literal["default"] | int | None = None,
         mode: str = "rb",
         cache_type: str = "bytes",
         cache_options: dict[str, Any] | None = None,
@@ -607,7 +606,7 @@ class HTTPFile(AbstractBufferedFile):
             fs=fs,
             path=url,
             mode=mode,
-            block_size=block_size,
+            block_size=block_size,  # pyright: ignore
             cache_type=cache_type,
             cache_options=cache_options,
             **kwargs,
@@ -615,20 +614,23 @@ class HTTPFile(AbstractBufferedFile):
 
     def read(self, length: int = -1) -> bytes:
         """Read bytes from file."""
+        file_size = self.size  # type: ignore
+        assert isinstance(self.blocksize, int)
         if (length < 0 and self.loc == 0) and not (
-            self.size is not None and self.size <= self.blocksize
+            file_size is not None and file_size <= self.blocksize
         ):
             self._fetch_all()
-        if self.size is None:
+        if file_size is None:
             if length < 0:
                 self._fetch_all()
         else:
-            length = min(self.size - self.loc, length)
+            length = min(file_size - self.loc, length)
         return super().read(length)
 
     async def async_fetch_all(self) -> None:
         """Read whole file in one shot, without caching."""
-        if not isinstance(self.cache, AllBytes):
+        if not isinstance(self.cache, AllBytes):  # type: ignore[has-type]
+            assert self.session, "Session is not initialized"
             r = await self.session.get(str(self.fs.encode_url(self.url)), **self.kwargs)
             r.raise_for_status()
             out = r.content
@@ -741,9 +743,9 @@ class HTTPStreamFile(AbstractBufferedFile):
         if not self.seekable():
             msg = "Stream is not seekable"
             raise ValueError(msg)
-
+        current_loc = self.loc  # type: ignore
         if whence == 1:  # SEEK_CUR
-            loc = self.loc + loc
+            loc = current_loc + loc
         elif whence == 2:  # SEEK_END  # noqa: PLR2004
             msg = "Cannot seek from end in streaming file"
             raise ValueError(msg)
@@ -753,13 +755,13 @@ class HTTPStreamFile(AbstractBufferedFile):
             msg = "Cannot seek before start of file"
             raise ValueError(msg)
 
-        if loc == self.loc:
-            return self.loc
+        if loc == current_loc:
+            return current_loc
 
-        if loc < self.loc:
+        if loc < current_loc:
             if loc == 0:
                 # Only support seeking back to start
-                self.r = sync(self.loop, self._init)
+                self.r = sync(self.loop, self._init)  # pyright: ignore
                 self._content_buffer = b""
                 self._stream = None
                 self.loc = 0
@@ -788,6 +790,7 @@ class HTTPStreamFile(AbstractBufferedFile):
     async def _read(self, num: int = -1) -> bytes:
         """Read bytes from remote file."""
         if not self._stream:
+            assert self.r
             self._stream = self.r.aiter_bytes()
             self._content_buffer = b""
 
@@ -795,7 +798,7 @@ class HTTPStreamFile(AbstractBufferedFile):
             # Read all remaining data
             chunks = [self._content_buffer]
             assert self._stream
-            async for chunk in self._stream:
+            async for chunk in self._stream:  # pyright: ignore
                 chunks.append(chunk)  # noqa: PERF401
             self._content_buffer = b""
             data = b"".join(chunks)
@@ -815,7 +818,7 @@ class HTTPStreamFile(AbstractBufferedFile):
         try:
             assert self._stream
             while bytes_needed > 0:
-                chunk = await self._stream.__anext__()
+                chunk = await self._stream.__anext__()  # pyright: ignore
                 result.append(chunk)
                 bytes_needed -= len(chunk)
         except StopAsyncIteration:
@@ -835,7 +838,7 @@ class HTTPStreamFile(AbstractBufferedFile):
 
     async def _close(self) -> None:
         assert self.r
-        await self.r.aclose()
+        await self.r.aclose()  # pyright: ignore
 
     def close(self) -> None:
         asyncio.run_coroutine_threadsafe(self._close(), self.loop)
@@ -874,7 +877,7 @@ class AsyncStreamFile(AbstractAsyncStreamedFile):
             self.fs._raise_not_found_for_status(r, self.url)
             self.r = r
 
-        chunk = await self.r.aread(num)
+        chunk = await self.r.aread()  # (num)
         self.loc += len(chunk)
         return chunk
 
